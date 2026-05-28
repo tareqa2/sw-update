@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h1>// UPDATE HISTORY</h1>
+
+<div class="panel">
+  {% if records %}
+  <table>
+    <thead>
+      <tr>
+        <th>Timestamp</th>
+        <th>Component</th>
+        <th>From</th>
+        <th>To</th>
+        <th>Action</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for record in records | reverse %}
+      <tr>
+        <td style="color:var(--text-dim); font-size:0.85rem;">{{ record.Timestamp }}</td>
+        <td style="color:var(--accent); font-weight:700;">{{ record.Component }}</td>
+        <td>{{ record.OldVersion }}</td>
+        <td>{{ record.NewVersion }}</td>
+        <td>
+          {% if record.Action == 'upgrade' %}
+            <span class="badge badge-upgrade">↑ Upgrade</span>
+          {% elif record.Action == 'downgrade' %}
+            <span class="badge badge-downgrade">↓ Downgrade</span>
+          {% else %}
+            <span class="badge badge-nochange">✓ No Change</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div style="text-align:center; padding:3rem; color:var(--text-dim); font-family:var(--font-mono);">
+    No update history found.
+  </div>
+  {% endif %}
+</div>
+
+<div class="btn-row">
+  <a href="{{ url_for('index') }}" class="btn btn-ghost">← Dashboard</a>
+</div>
+
+{% endblock %}

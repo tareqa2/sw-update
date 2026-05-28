@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h1>// VERSION UPDATE</h1>
+
+{% if not confirm %}
+<!-- STEP 1: Enter desired versions -->
+<div class="panel">
+  <div style="margin-bottom:1.2rem;">
+    <div style="font-size:0.75rem; letter-spacing:2px; text-transform:uppercase; color:var(--text-dim); font-family:var(--font-ui); font-weight:600; margin-bottom:0.5rem;">Instructions</div>
+    <div style="font-family:var(--font-mono); font-size:0.85rem; color:var(--text-dim);">Enter desired version for each component. Leave blank to keep current version.</div>
+  </div>
+
+  <form method="POST" action="{{ url_for('update') }}">
+    <div class="form-grid">
+      {% for component, version in installed.items() %}
+      <div class="form-group">
+        <label>{{ component }}</label>
+        <input type="text" name="{{ component }}" placeholder="{{ version }}" />
+        <div class="hint">current: {{ version }}</div>
+      </div>
+      {% endfor %}
+    </div>
+    <div class="btn-row">
+      <button type="submit" class="btn btn-primary">Compare Versions →</button>
+      <a href="{{ url_for('index') }}" class="btn btn-ghost">Cancel</a>
+    </div>
+  </form>
+</div>
+
+{% else %}
+<!-- STEP 2: Show comparison and confirm -->
+<div class="panel">
+  <div style="font-size:0.75rem; letter-spacing:2px; text-transform:uppercase; color:var(--text-dim); font-family:var(--font-ui); font-weight:600; margin-bottom:1rem;">Comparison Results</div>
+  <table>
+    <thead>
+      <tr>
+        <th>Component</th>
+        <th>Installed</th>
+        <th>Desired</th>
+        <th>Action</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for component in installed %}
+      <tr>
+        <td style="color:var(--accent); font-weight:700;">{{ component }}</td>
+        <td>{{ installed[component] }}</td>
+        <td>{{ desired[component] }}</td>
+        <td>
+          {% set action = actions[component] %}
+          {% if action == 'upgrade' %}
+            <span class="badge badge-upgrade">↑ Upgrade</span>
+          {% elif action == 'downgrade' %}
+            <span class="badge badge-downgrade">↓ Downgrade</span>
+          {% else %}
+            <span class="badge badge-nochange">✓ No Change</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<form method="POST" action="{{ url_for('update') }}">
+  {% for component, version in desired.items() %}
+    <input type="hidden" name="{{ component }}" value="{{ version }}" />
+  {% endfor %}
+  <input type="hidden" name="confirm" value="1" />
+  <div class="btn-row">
+    <button type="submit" class="btn btn-success">Apply Updates ✓</button>
+    <a href="{{ url_for('update') }}" class="btn btn-ghost">← Go Back</a>
+  </div>
+</form>
+{% endif %}
+
+{% endblock %}
