@@ -6,25 +6,29 @@
 {% set updated_count = details.values() | selectattr('status', 'equalto', 'updated') | list | length %}
 {% set initial_count = details.values() | selectattr('status', 'equalto', 'initial') | list | length %}
 
+{% set label_map = {'OS': 'OS', 'BE': 'Backend', 'DB': 'Database', 'FW': 'Frontend'} %}
+{% set class_map = {'OS': 'comp-os', 'BE': 'comp-backend', 'DB': 'comp-db', 'FW': 'comp-frontend'} %}
+{% set card_map  = {'OS': '', 'BE': 'purple', 'DB': 'orange', 'FW': 'green'} %}
+
 <div class="stats-row">
   <div class="stat-card">
     <div class="stat-label">Total Components</div>
     <div class="stat-value">{{ details | length }}</div>
     <div class="stat-sub">tracked</div>
   </div>
-  <div class="stat-card ok">
+  <div class="stat-card green">
     <div class="stat-label">Updated</div>
-    <div class="stat-value" style="color:var(--accent2)">{{ updated_count }}</div>
+    <div class="stat-value green">{{ updated_count }}</div>
     <div class="stat-sub">components</div>
   </div>
-  <div class="stat-card">
+  <div class="stat-card purple">
     <div class="stat-label">Initial</div>
-    <div class="stat-value" style="color:var(--text-dim)">{{ initial_count }}</div>
+    <div class="stat-value purple">{{ initial_count }}</div>
     <div class="stat-sub">components</div>
   </div>
-  <div class="stat-card">
+  <div class="stat-card orange">
     <div class="stat-label">System</div>
-    <div class="stat-value" style="font-size:1rem; color:var(--accent2)">ONLINE</div>
+    <div class="stat-value" style="font-size:1rem;color:var(--green);margin-top:0.3rem;">ONLINE</div>
     <div class="stat-sub">all services running</div>
   </div>
 </div>
@@ -35,17 +39,17 @@
       <tr>
         <th>Component</th>
         <th>Current Version</th>
-        <th>Previous Version</th>
         <th>Status</th>
         <th>Last Updated</th>
       </tr>
     </thead>
     <tbody>
       {% for component, info in details.items() %}
+      {% set label = label_map.get(component, component) %}
+      {% set cls   = class_map.get(component, '') %}
       <tr>
-        <td style="color:var(--accent); font-weight:700;">{{ component }}</td>
-        <td>{{ info.version }}</td>
-        <td style="color:var(--text-dim)">—</td>
+        <td><span class="{{ cls }}">{{ label }}</span></td>
+        <td style="font-family:var(--mono)">{{ info.version }}</td>
         <td>
           {% if info.status == 'updated' %}
             <span class="badge badge-updated">✓ Updated</span>
@@ -53,7 +57,7 @@
             <span class="badge badge-initial">● Initial</span>
           {% endif %}
         </td>
-        <td style="color:var(--text-dim); font-size:0.85rem;">{{ info.date }}</td>
+        <td style="color:var(--text-dim);font-size:0.85rem;font-family:var(--mono)">{{ info.date }}</td>
       </tr>
       {% endfor %}
     </tbody>

@@ -3,19 +3,24 @@
 
 <h1>// VERSION UPDATE</h1>
 
+{% set label_map = {'OS': 'OS', 'BE': 'Backend', 'DB': 'Database', 'FW': 'Frontend'} %}
+{% set class_map = {'OS': 'comp-os', 'BE': 'comp-backend', 'DB': 'comp-db', 'FW': 'comp-frontend'} %}
+
 {% if not confirm %}
 <!-- STEP 1: Enter desired versions -->
 <div class="panel">
   <div style="margin-bottom:1.2rem;">
-    <div style="font-size:0.75rem; letter-spacing:2px; text-transform:uppercase; color:var(--text-dim); font-family:var(--font-ui); font-weight:600; margin-bottom:0.5rem;">Instructions</div>
-    <div style="font-family:var(--font-mono); font-size:0.85rem; color:var(--text-dim);">Enter desired version for each component. Leave blank to keep current version.</div>
+    <div style="font-size:0.7rem;letter-spacing:2px;text-transform:uppercase;color:var(--text-dim);font-family:var(--ui);font-weight:600;margin-bottom:0.5rem;">Instructions</div>
+    <div style="font-family:var(--mono);font-size:0.85rem;color:var(--text-dim);">Enter desired version for each component. Leave blank to keep current version.</div>
   </div>
 
   <form method="POST" action="{{ url_for('update') }}">
     <div class="form-grid">
       {% for component, version in installed.items() %}
+      {% set label = label_map.get(component, component) %}
+      {% set cls   = class_map.get(component, '') %}
       <div class="form-group">
-        <label>{{ component }}</label>
+        <label><span class="{{ cls }}">{{ label }}</span></label>
         <input type="text" name="{{ component }}" placeholder="{{ version }}" />
         <div class="hint">current: {{ version }}</div>
       </div>
@@ -29,9 +34,36 @@
 </div>
 
 {% else %}
-<!-- STEP 2: Show comparison and confirm -->
+<!-- STEP 2: Comparison + downgrade warning modal -->
+
+{% set has_downgrade = actions.values() | select('equalto', 'downgrade') | list | length > 0 %}
+
+<!-- DOWNGRADE WARNING MODAL -->
+{% if has_downgrade %}
+<div class="modal-overlay active" id="downgradeModal">
+  <div class="modal">
+    <div class="modal-icon">⚠️</div>
+    <h2>DOWNGRADE WARNING</h2>
+    <p>The following components will be <strong style="color:var(--red)">downgraded</strong> to a lower version. This may cause instability or compatibility issues.</p>
+    <div class="modal-items">
+      {% for component, action in actions.items() %}
+        {% if action == 'downgrade' %}
+          {% set label = label_map.get(component, component) %}
+          <div class="modal-item">↓ {{ label }}: {{ installed[component] }} → {{ desired[component] }}</div>
+        {% endif %}
+      {% endfor %}
+    </div>
+    <p>Are you sure you want to proceed?</p>
+    <div class="modal-btns">
+      <a href="{{ url_for('update') }}" class="btn btn-ghost">← Go Back</a>
+      <button class="btn btn-danger" onclick="document.getElementById('downgradeModal').classList.remove('active')">Proceed Anyway</button>
+    </div>
+  </div>
+</div>
+{% endif %}
+
 <div class="panel">
-  <div style="font-size:0.75rem; letter-spacing:2px; text-transform:uppercase; color:var(--text-dim); font-family:var(--font-ui); font-weight:600; margin-bottom:1rem;">Comparison Results</div>
+  <div style="font-size:0.7rem;letter-spacing:2px;text-transform:uppercase;color:var(--text-dim);font-family:var(--ui);font-weight:600;margin-bottom:1rem;">Comparison Results</div>
   <table>
     <thead>
       <tr>
@@ -43,10 +75,12 @@
     </thead>
     <tbody>
       {% for component in installed %}
+      {% set label = label_map.get(component, component) %}
+      {% set cls   = class_map.get(component, '') %}
       <tr>
-        <td style="color:var(--accent); font-weight:700;">{{ component }}</td>
-        <td>{{ installed[component] }}</td>
-        <td>{{ desired[component] }}</td>
+        <td><span class="{{ cls }}">{{ label }}</span></td>
+        <td style="font-family:var(--mono)">{{ installed[component] }}</td>
+        <td style="font-family:var(--mono)">{{ desired[component] }}</td>
         <td>
           {% set action = actions[component] %}
           {% if action == 'upgrade' %}
