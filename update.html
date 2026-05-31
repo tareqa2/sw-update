@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block content %}
+
+{% set label_map = {'OS':'OS','BE':'Backend','DB':'Database','FW':'Frontend'} %}
+{% set class_map = {'OS':'comp-os','BE':'comp-backend','DB':'comp-db','FW':'comp-frontend'} %}
+{% set icon_map  = {'OS':'/static/OS.jpg','BE':'/static/back_end.jpg','DB':'/static/data_base.jpg','FW':'/static/frontend.jpg'} %}
+{% set color_map = {'OS':'var(--cyan)','BE':'var(--purple)','DB':'var(--orange)','FW':'var(--green)'} %}
+
+<h1>// {{ device.upper() }} — SYSTEM STATUS</h1>
+
+{% set updated_count = details.values() | selectattr('status','equalto','updated') | list | length %}
+
+<div class="stats-row">
+  <div class="stat-card">
+    <div class="stat-label">Device</div>
+    <div class="stat-value" style="font-size:1.2rem;color:var(--cyan)">{{ device.upper() }}</div>
+    <div class="stat-sub">active session</div>
+  </div>
+  <div class="stat-card green">
+    <div class="stat-label">Updated</div>
+    <div class="stat-value green">{{ updated_count }}</div>
+    <div class="stat-sub">components</div>
+  </div>
+  <div class="stat-card purple">
+    <div class="stat-label">Total</div>
+    <div class="stat-value purple">{{ details|length }}</div>
+    <div class="stat-sub">tracked</div>
+  </div>
+  <div class="stat-card orange">
+    <div class="stat-label">System</div>
+    <div class="stat-value" style="font-size:1rem;color:var(--green);margin-top:0.3rem">ONLINE</div>
+    <div class="stat-sub">all services running</div>
+  </div>
+</div>
+
+<!-- COMPONENT CARDS -->
+<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:1.2rem;margin-bottom:2rem;">
+  {% for component, info in details.items() %}
+  {% set label = label_map.get(component, component) %}
+  {% set cls   = class_map.get(component, '') %}
+  {% set icon  = icon_map.get(component, '') %}
+  {% set color = color_map.get(component, 'var(--cyan)') %}
+  <div class="panel" style="padding:0;overflow:hidden;border-color:{{ color }}22;">
+    <!-- Image -->
+    <div style="height:120px;overflow:hidden;position:relative;">
+      <img src="{{ icon }}" alt="{{ label }}" style="width:100%;height:100%;object-fit:cover;filter:brightness(0.5) saturate(1.2);">
+      <div style="position:absolute;inset:0;background:linear-gradient(180deg,transparent 30%,var(--panel) 100%);"></div>
+      <div style="position:absolute;top:10px;left:12px;font-family:var(--title);font-size:0.85rem;letter-spacing:3px;color:{{ color }};text-shadow:0 0 10px {{ color }};">{{ label }}</div>
+    </div>
+    <!-- Info -->
+    <div style="padding:1rem 1.2rem;">
+      <div style="font-family:var(--mono);font-size:1.3rem;color:{{ color }};margin-bottom:0.4rem;">v{{ info.version }}</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;">
+        {% if info.status == 'updated' %}
+          <span class="badge badge-updated">✓ Updated</span>
+        {% else %}
+          <span class="badge badge-initial">● Initial</span>
+        {% endif %}
+        <span style="font-family:var(--mono);font-size:0.72rem;color:var(--text-dim);">{{ info.date[:10] }}</span>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+<div class="btn-row">
+  <a href="{{ url_for('update', device=device) }}" class="btn btn-primary">⚡ Run Version Update</a>
+  <a href="{{ url_for('history', device=device) }}" class="btn btn-ghost">View History</a>
+</div>
+
+{% endblock %}

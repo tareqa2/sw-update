@@ -1,213 +1,71 @@
-"""
-CSV Manager Module for Version Tracking
-Handles reading and writing version data to CSV file
-"""
+from flask import Flask, render_template, request, redirect, url_for, flash, jsonify
+import csv_manager
+from compare_versions import compare_versions
+import time
 
-import csv
-import os
-from datetime import datetime
+app = Flask(__name__)
+app.secret_key = 'sw-update-secret-key'
 
+DEVICES = csv_manager.DEVICES
 
-CSV_FILE = 'versions.csv'
-CSV_HEADERS = ['Component', 'CurrentVersion', 'LastUpdateDate', 'PreviousVersion', 'UpdateStatus']
+@app.route('/')
+def index():
+    device = request.args.get('device', 'lab1')
+    details = csv_manager.load_installed_details(device)
+    return render_template('index.html', details=details, device=device, devices=DEVICES)
 
-# Default versions to use if CSV doesn't exist
-DEFAULT_VERSIONS = {
-    'OS': '10.2',
-    'BE': '10.0.19042',
-    'DB': '12.1',
-    'FW': '3.5.1'
-}
+@app.route('/update', methods=['GET', 'POST'])
+def update():
+    device = request.args.get('device', request.form.get('device', 'lab1'))
+    installed = csv_manager.load_installed_versions(device)
 
+    if request.method == 'POST':
+        branch     = request.form.get('branch', 'manual')
+        commit_id  = request.form.get('commit_id', '').strip()
+        desired    = {}
 
-def load_installed_versions():
-    """
-    Load installed versions from CSV file.
-    Returns a dictionary of component: version pairs.
-    If CSV doesn't exist, creates it with default versions.
-    """
-    if not os.path.exists(CSV_FILE):
-        print(f"Warning: {CSV_FILE} not found. Creating with default versions.")
-        save_versions(DEFAULT_VERSIONS, is_initial=True)
-        return DEFAULT_VERSIONS.copy()
-    
-    try:
-        versions = {}
-        with open(CSV_FILE, 'r', newline='') as file:
-            reader = csv.DictReader(file)
-            for row in reader:
-                component = row['Component']
-                current_version = row['CurrentVersion']
-                versions[component] = current_version
-        
-        if not versions:
-            print(f"Warning: {CSV_FILE} is empty. Using default versions.")
-            return DEFAULT_VERSIONS.copy()
-        
-        return versions
-    
-    except Exception as e:
-        print(f"Error reading {CSV_FILE}: {e}")
-        print("Using default versions as fallback.")
-        return DEFAULT_VERSIONS.copy()
+        for component in installed:
+            val = request.form.get(component, '').strip()
+            desired[component] = val if val else installed[component]
 
+        actions = compare_versions(installed, desired)
 
-def load_installed_details():
-    """
-    Load complete installed version details from CSV file.
-    Returns a dictionary of component: {version, status, date} pairs.
-    If CSV doesn't exist, creates it with default versions.
-    """
-    if not os.path.exists(CSV_FILE):
-        print(f"Warning: {CSV_FILE} not found. Creating with default versions.")
-        save_versions(DEFAULT_VERSIONS, is_initial=True)
-        # Return default structure
-        default_details = {}
-        for comp, ver in DEFAULT_VERSIONS.items():
-            default_details[comp] = {
-                'version': ver,
-                'status': 'initial',
-                'date': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            }
-        return default_details
-    
-    try:
-        details = {}
-        with open(CSV_FILE, 'r', newline='') as file:
-            reader = csv.DictReader(file)
-            for row in reader:
-                component = row['Component']
-                details[component] = {
-                    'version': row['CurrentVersion'],
-                    'status': row.get('UpdateStatus', 'unknown'),
-                    'date': row.get('LastUpdateDate', 'N/A')
-                }
-        
-        if not details:
-            print(f"Warning: {CSV_FILE} is empty. Using default versions.")
-            default_details = {}
-            for comp, ver in DEFAULT_VERSIONS.items():
-                default_details[comp] = {
-                    'version': ver,
-                    'status': 'initial',
-                    'date': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                }
-            return default_details
-        
-        return details
-    
-    except Exception as e:
-        print(f"Error reading {CSV_FILE}: {e}")
-        print("Using default versions as fallback.")
-        default_details = {}
-        for comp, ver in DEFAULT_VERSIONS.items():
-            default_details[comp] = {
-                'version': ver,
-                'status': 'initial',
-                'date': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            }
-        return default_details
+        if 'confirm' in request.form:
+            previous = installed.copy()
+            for key, action in actions.items():
+                new_ver = desired[key]
+                csv_manager.append_update_history(device, key, installed[key], new_ver, action, branch, commit_id)
+                if action in ('upgrade', 'downgrade'):
+                    installed[key] = new_ver
+            csv_manager.save_versions(device, installed, is_initial=False, previous_versions=previous)
+            flash(f'Updates applied to {device} successfully!', 'success')
+            return redirect(url_for('index', device=device))
 
+        return render_template('update.html',
+            installed=installed, desired=desired, actions=actions,
+            confirm=True, device=device, devices=DEVICES,
+            branch=branch, commit_id=commit_id)
 
-def save_versions(versions_dict, is_initial=False, previous_versions=None):
-    """
-    Save updated versions to CSV file.
-    
-    Args:
-        versions_dict: Dictionary of component: version pairs
-        is_initial: Boolean indicating if this is initial setup
-        previous_versions: Dictionary of previous versions (for update tracking)
-    """
-    try:
-        # Determine if file exists to decide on mode
-        file_exists = os.path.exists(CSV_FILE)
-        
-        with open(CSV_FILE, 'w', newline='') as file:
-            writer = csv.DictWriter(file, fieldnames=CSV_HEADERS)
-            writer.writeheader()
-            
-            current_date = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            
-            for component, current_version in versions_dict.items():
-                previous_version = ''
-                update_status = 'initial' if is_initial else 'updated'
-                
-                if previous_versions and component in previous_versions:
-                    previous_version = previous_versions[component]
-                
-                writer.writerow({
-                    'Component': component,
-                    'CurrentVersion': current_version,
-                    'LastUpdateDate': current_date,
-                    'PreviousVersion': previous_version,
-                    'UpdateStatus': update_status
-                })
-        
-        print(f"Versions saved to {CSV_FILE}")
-        return True
-    
-    except Exception as e:
-        print(f"Error saving to {CSV_FILE}: {e}")
-        return False
+    return render_template('update.html',
+        installed=installed, desired={}, actions={},
+        confirm=False, device=device, devices=DEVICES,
+        branch='manual', commit_id='')
 
+@app.route('/history')
+def history():
+    device = request.args.get('device', 'lab1')
+    records = csv_manager.get_version_history(device)
+    return render_template('history.html', records=records, device=device, devices=DEVICES)
 
-def append_update_history(component, old_version, new_version, action):
-    """
-    Append an update record to the history CSV file.
-    
-    Args:
-        component: Component name (OS, BE, DB, FW)
-        old_version: Previous version
-        new_version: New version
-        action: Action taken (upgrade, downgrade, not required)
-    """
-    history_file = 'version_history.csv'
-    history_headers = ['Timestamp', 'Component', 'OldVersion', 'NewVersion', 'Action']
-    
-    try:
-        file_exists = os.path.exists(history_file)
-        
-        with open(history_file, 'a', newline='') as file:
-            writer = csv.DictWriter(file, fieldnames=history_headers)
-            
-            if not file_exists:
-                writer.writeheader()
-            
-            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            
-            writer.writerow({
-                'Timestamp': timestamp,
-                'Component': component,
-                'OldVersion': old_version,
-                'NewVersion': new_version,
-                'Action': action
-            })
-        
-        return True
-    
-    except Exception as e:
-        print(f"Error appending to history: {e}")
-        return False
+@app.route('/progress')
+def progress():
+    """Simulate progress for the update animation"""
+    def generate():
+        for i in range(0, 101, 10):
+            yield f"data: {i}\n\n"
+            time.sleep(0.3)
+    from flask import Response
+    return Response(generate(), mimetype='text/event-stream')
 
-
-def get_version_history():
-    """
-    Read and return all version history records.
-    Returns a list of dictionaries.
-    """
-    history_file = 'version_history.csv'
-    
-    if not os.path.exists(history_file):
-        return []
-    
-    try:
-        history = []
-        with open(history_file, 'r', newline='') as file:
-            reader = csv.DictReader(file)
-            for row in reader:
-                history.append(row)
-        return history
-    
-    except Exception as e:
-        print(f"Error reading history: {e}")
-        return []
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=80, debug=False)

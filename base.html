@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block content %}
+
+{% set label_map = {'OS':'OS','BE':'Backend','DB':'Database','FW':'Frontend'} %}
+{% set class_map = {'OS':'comp-os','BE':'comp-backend','DB':'comp-db','FW':'comp-frontend'} %}
+
+<h1>// {{ device.upper() }} — UPDATE HISTORY</h1>
+
+<div class="panel">
+  {% if records %}
+  <table>
+    <thead>
+      <tr><th>Timestamp</th><th>Component</th><th>From</th><th>To</th><th>Action</th><th>Branch</th><th>Commit</th></tr>
+    </thead>
+    <tbody>
+      {% for record in records | reverse %}
+      {% set label = label_map.get(record.Component, record.Component) %}
+      {% set cls   = class_map.get(record.Component, '') %}
+      <tr>
+        <td style="color:var(--text-dim);font-size:0.82rem;font-family:var(--mono)">{{ record.Timestamp }}</td>
+        <td><span class="{{ cls }}">{{ label }}</span></td>
+        <td style="font-family:var(--mono)">{{ record.OldVersion }}</td>
+        <td style="font-family:var(--mono)">{{ record.NewVersion }}</td>
+        <td>
+          {% if record.Action == 'upgrade' %}<span class="badge badge-upgrade">↑ Upgrade</span>
+          {% elif record.Action == 'downgrade' %}<span class="badge badge-downgrade">↓ Downgrade</span>
+          {% else %}<span class="badge badge-nochange">✓ No Change</span>{% endif %}
+        </td>
+        <td style="font-family:var(--mono);font-size:0.8rem;color:var(--cyan)">{{ record.get('Branch','manual') }}</td>
+        <td style="font-family:var(--mono);font-size:0.8rem;color:var(--yellow)">{{ record.get('CommitID','—') }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div style="text-align:center;padding:3rem;color:var(--text-dim);font-family:var(--mono);">No update history for {{ device.upper() }} yet.</div>
+  {% endif %}
+</div>
+
+<div class="btn-row">
+  <a href="{{ url_for('index', device=device) }}" class="btn btn-ghost">← Dashboard</a>
+</div>
+
+{% endblock %}

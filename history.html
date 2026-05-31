@@ -1,0 +1,210 @@
+{% extends "base.html" %}
+{% block content %}
+
+{% set label_map = {'OS':'OS','BE':'Backend','DB':'Database','FW':'Frontend'} %}
+{% set class_map = {'OS':'comp-os','BE':'comp-backend','DB':'comp-db','FW':'comp-frontend'} %}
+
+<h1>// {{ device.upper() }} — VERSION UPDATE</h1>
+
+{% if not confirm %}
+<div class="panel">
+  <div style="margin-bottom:1.5rem;">
+    <div style="font-size:0.7rem;letter-spacing:2px;text-transform:uppercase;color:var(--text-dim);margin-bottom:0.5rem;font-weight:600;">Update Configuration</div>
+  </div>
+
+  <form method="POST" action="{{ url_for('update', device=device) }}" id="updateForm">
+    <input type="hidden" name="device" value="{{ device }}">
+
+    <!-- BRANCH SELECTOR -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-bottom:1.5rem;padding-bottom:1.5rem;border-bottom:1px solid var(--border);">
+      <div class="form-group">
+        <label>Version Source</label>
+        <select name="branch" id="branchSelect" onchange="handleBranchChange(this.value)">
+          <option value="manual">✏️ Manual — Enter version</option>
+          <option value="master">🌿 Master Branch</option>
+          <option value="side">🌱 Side Branch</option>
+        </select>
+      </div>
+      <div class="form-group" id="commitGroup" style="display:none;">
+        <label>Commit ID</label>
+        <input type="text" name="commit_id" id="commitId" placeholder="e.g. a3f9c12" />
+        <div class="hint">7-character commit hash</div>
+      </div>
+      <div class="form-group" id="branchNameGroup" style="display:none;">
+        <label>Branch Name</label>
+        <input type="text" name="branch_name" id="branchName" placeholder="e.g. feature/auth-update" />
+      </div>
+    </div>
+
+    <!-- VERSION INPUTS -->
+    <div style="font-size:0.7rem;letter-spacing:2px;text-transform:uppercase;color:var(--text-dim);margin-bottom:1rem;font-weight:600;">Component Versions</div>
+    <div class="form-grid" id="versionInputs">
+      {% for component, version in installed.items() %}
+      {% set label = label_map.get(component, component) %}
+      {% set cls   = class_map.get(component, '') %}
+      <div class="form-group">
+        <label><span class="{{ cls }}">{{ label }}</span></label>
+        <input type="text" name="{{ component }}" id="input_{{ component }}" placeholder="{{ version }}" />
+        <div class="hint">current: {{ version }}</div>
+      </div>
+      {% endfor %}
+    </div>
+
+    <div class="btn-row">
+      <button type="submit" class="btn btn-primary">Compare Versions →</button>
+      <a href="{{ url_for('index', device=device) }}" class="btn btn-ghost">Cancel</a>
+    </div>
+  </form>
+</div>
+
+{% else %}
+<!-- STEP 2: Comparison + confirm -->
+
+{% set has_downgrade = actions.values() | select('equalto','downgrade') | list | length > 0 %}
+
+{% if has_downgrade %}
+<div class="modal-overlay active" id="downgradeModal">
+  <div class="modal">
+    <div class="modal-icon">⚠️</div>
+    <h2>DOWNGRADE WARNING</h2>
+    <p>The following components will be <strong style="color:var(--red)">downgraded</strong>. This may cause instability.</p>
+    <div class="modal-items">
+      {% for component, action in actions.items() %}
+        {% if action == 'downgrade' %}
+          <div class="modal-item">↓ {{ label_map.get(component, component) }}: {{ installed[component] }} → {{ desired[component] }}</div>
+        {% endif %}
+      {% endfor %}
+    </div>
+    <p>Are you sure you want to proceed?</p>
+    <div class="modal-btns">
+      <a href="{{ url_for('update', device=device) }}" class="btn btn-ghost">← Go Back</a>
+      <button class="btn btn-danger" onclick="document.getElementById('downgradeModal').classList.remove('active')">Proceed Anyway</button>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<!-- PROGRESS OVERLAY -->
+<div class="progress-overlay" id="progressOverlay">
+  <div class="progress-box">
+    <div class="progress-title">APPLYING UPDATES</div>
+    <div class="progress-sub" id="progressDevice">Device: {{ device.upper() }}</div>
+    <div class="progress-bar-wrap">
+      <div class="progress-bar-fill" id="progressFill"></div>
+    </div>
+    <div class="progress-pct" id="progressPct">0%</div>
+    <div class="progress-steps" id="progressStep">Initializing...</div>
+  </div>
+</div>
+
+<div class="panel">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;flex-wrap:wrap;gap:0.5rem;">
+    <div style="font-size:0.7rem;letter-spacing:2px;text-transform:uppercase;color:var(--text-dim);font-weight:600;">Comparison Results — {{ device.upper() }}</div>
+    <div style="font-family:var(--mono);font-size:0.8rem;color:var(--text-dim);">
+      Branch: <span style="color:var(--cyan)">{{ branch }}</span>
+      {% if commit_id %} | Commit: <span style="color:var(--yellow)">{{ commit_id }}</span>{% endif %}
+    </div>
+  </div>
+  <table>
+    <thead>
+      <tr><th>Component</th><th>Installed</th><th>Desired</th><th>Action</th></tr>
+    </thead>
+    <tbody>
+      {% for component in installed %}
+      {% set label = label_map.get(component, component) %}
+      {% set cls   = class_map.get(component, '') %}
+      <tr>
+        <td><span class="{{ cls }}">{{ label }}</span></td>
+        <td style="font-family:var(--mono)">{{ installed[component] }}</td>
+        <td style="font-family:var(--mono)">{{ desired[component] }}</td>
+        <td>
+          {% set action = actions[component] %}
+          {% if action == 'upgrade' %}<span class="badge badge-upgrade">↑ Upgrade</span>
+          {% elif action == 'downgrade' %}<span class="badge badge-downgrade">↓ Downgrade</span>
+          {% else %}<span class="badge badge-nochange">✓ No Change</span>{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<form method="POST" action="{{ url_for('update', device=device) }}" id="confirmForm">
+  {% for component, version in desired.items() %}
+    <input type="hidden" name="{{ component }}" value="{{ version }}" />
+  {% endfor %}
+  <input type="hidden" name="device" value="{{ device }}" />
+  <input type="hidden" name="confirm" value="1" />
+  <input type="hidden" name="branch" value="{{ branch }}" />
+  <input type="hidden" name="commit_id" value="{{ commit_id }}" />
+  <div class="btn-row">
+    <button type="button" class="btn btn-success" onclick="startUpdate()">⚡ Apply Updates</button>
+    <a href="{{ url_for('update', device=device) }}" class="btn btn-ghost">← Go Back</a>
+  </div>
+</form>
+
+<script>
+const steps = [
+  'Connecting to device {{ device.upper() }}...',
+  'Verifying component signatures...',
+  'Downloading update packages...',
+  'Installing OS updates...',
+  'Installing Backend updates...',
+  'Installing Database updates...',
+  'Installing Frontend updates...',
+  'Running post-install checks...',
+  'Updating version registry...',
+  'Finalizing and cleaning up...',
+  'Update complete!'
+];
+
+function startUpdate() {
+  document.getElementById('progressOverlay').classList.add('active');
+  let pct = 0;
+  let step = 0;
+  const fill = document.getElementById('progressFill');
+  const pctEl = document.getElementById('progressPct');
+  const stepEl = document.getElementById('progressStep');
+
+  const interval = setInterval(() => {
+    pct += 10;
+    fill.style.width = pct + '%';
+    pctEl.textContent = pct + '%';
+    stepEl.textContent = steps[step] || '';
+    step++;
+    if (pct >= 100) {
+      clearInterval(interval);
+      stepEl.textContent = '✓ Complete! Saving...';
+      setTimeout(() => document.getElementById('confirmForm').submit(), 800);
+    }
+  }, 350);
+}
+</script>
+{% endif %}
+
+<script>
+function handleBranchChange(val) {
+  const commitGroup = document.getElementById('commitGroup');
+  const branchNameGroup = document.getElementById('branchNameGroup');
+  const versionInputs = document.getElementById('versionInputs');
+
+  if (val === 'manual') {
+    commitGroup.style.display = 'none';
+    branchNameGroup.style.display = 'none';
+    versionInputs.style.opacity = '1';
+    versionInputs.style.pointerEvents = 'auto';
+  } else if (val === 'master') {
+    commitGroup.style.display = 'block';
+    branchNameGroup.style.display = 'none';
+    versionInputs.style.opacity = '0.5';
+    versionInputs.style.pointerEvents = 'none';
+  } else if (val === 'side') {
+    commitGroup.style.display = 'block';
+    branchNameGroup.style.display = 'block';
+    versionInputs.style.opacity = '0.5';
+    versionInputs.style.pointerEvents = 'none';
+  }
+}
+</script>
+
+{% endblock %}
