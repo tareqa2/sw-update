@@ -1,54 +1,104 @@
 {% extends "base.html" %}
 {% block content %}
+{% set label_map = {'OS':'Operating System','BE':'Backend','DB':'Database','FW':'Frontend'} %}
 
-<h1>// UPDATE HISTORY</h1>
+<div class="page-title">{{ device.upper() }} History</div>
+<div class="page-sub">All version updates applied to this device</div>
 
-{% set label_map = {'OS': 'OS', 'BE': 'Backend', 'DB': 'Database', 'FW': 'Frontend'} %}
-{% set class_map = {'OS': 'comp-os', 'BE': 'comp-backend', 'DB': 'comp-db', 'FW': 'comp-frontend'} %}
+<div class="card">
+  <!-- FILTER BAR -->
+  <div class="filter-bar">
+    <span class="filter-label">Filter:</span>
+    <select id="filterComponent" onchange="applyFilters()">
+      <option value="">All Components</option>
+      <option value="Operating System">Operating System</option>
+      <option value="Backend">Backend</option>
+      <option value="Database">Database</option>
+      <option value="Frontend">Frontend</option>
+    </select>
+    <select id="filterAction" onchange="applyFilters()">
+      <option value="">All Actions</option>
+      <option value="upgrade">Upgrade</option>
+      <option value="downgrade">Downgrade</option>
+      <option value="nochange">No Change</option>
+    </select>
+    <select id="filterSource" onchange="applyFilters()">
+      <option value="">All Sources</option>
+      <option value="manual">Manual</option>
+      <option value="master">Master</option>
+      <option value="side">Side Branch</option>
+    </select>
+    <input type="date" id="filterDate" onchange="applyFilters()" placeholder="Filter by date" style="width:140px;">
+    <button onclick="clearFilters()" class="btn btn-secondary" style="padding:5px 12px;font-size:0.72rem;">Clear</button>
+  </div>
 
-<div class="panel">
   {% if records %}
-  <table>
+  <table class="data-table" id="historyTable">
     <thead>
-      <tr>
-        <th>Timestamp</th>
-        <th>Component</th>
-        <th>From</th>
-        <th>To</th>
-        <th>Action</th>
-      </tr>
+      <tr><th>Date</th><th>Component</th><th>From</th><th>To</th><th>Action</th><th>Source</th></tr>
     </thead>
-    <tbody>
+    <tbody id="historyBody">
       {% for record in records | reverse %}
       {% set label = label_map.get(record.Component, record.Component) %}
-      {% set cls   = class_map.get(record.Component, '') %}
-      <tr>
-        <td style="color:var(--text-dim);font-size:0.85rem;font-family:var(--mono)">{{ record.Timestamp }}</td>
-        <td><span class="{{ cls }}">{{ label }}</span></td>
-        <td style="font-family:var(--mono)">{{ record.OldVersion }}</td>
-        <td style="font-family:var(--mono)">{{ record.NewVersion }}</td>
+      <tr
+        data-component="{{ label }}"
+        data-action="{{ record.Action }}"
+        data-source="{{ record.get('Branch','') }}"
+        data-date="{{ record.Timestamp[:10] }}">
+        <td class="mono">{{ record.Timestamp[:16] }}</td>
+        <td>{{ label }}</td>
+        <td class="mono">{{ record.OldVersion }}</td>
+        <td class="mono">{{ record.NewVersion }}</td>
         <td>
-          {% if record.Action == 'upgrade' %}
-            <span class="badge badge-upgrade">↑ Upgrade</span>
-          {% elif record.Action == 'downgrade' %}
-            <span class="badge badge-downgrade">↓ Downgrade</span>
-          {% else %}
-            <span class="badge badge-nochange">✓ No Change</span>
-          {% endif %}
+          {% if record.Action == 'upgrade' %}<span class="pill pill-blue"><span class="pill-dot"></span>Upgrade</span>
+          {% elif record.Action == 'downgrade' %}<span class="pill pill-red"><span class="pill-dot"></span>Downgrade</span>
+          {% else %}<span class="pill pill-gray"><span class="pill-dot"></span>No change</span>{% endif %}
         </td>
+        <td class="mono">{{ record.get('Branch','—') }}{% if record.get('CommitID') %} · {{ record.CommitID }}{% endif %}</td>
       </tr>
       {% endfor %}
     </tbody>
   </table>
+  <div id="noResults" style="display:none;text-align:center;padding:40px;color:var(--gray-400);font-size:0.83rem;">No records match your filters.</div>
   {% else %}
-  <div style="text-align:center;padding:3rem;color:var(--text-dim);font-family:var(--mono);">
-    No update history found.
-  </div>
+  <div style="text-align:center;padding:56px;color:var(--gray-400);font-size:0.83rem;">No update history for {{ device.upper() }} yet.</div>
   {% endif %}
 </div>
 
-<div class="btn-row">
-  <a href="{{ url_for('index') }}" class="btn btn-ghost">← Dashboard</a>
+<div class="btn-group">
+  <a href="{{ url_for('index', device=device) }}" class="btn btn-secondary">← Overview</a>
+  <a href="{{ url_for('update', device=device) }}" class="btn btn-primary">New Update</a>
 </div>
 
+<script>
+function applyFilters(){
+  const comp=document.getElementById('filterComponent').value.toLowerCase();
+  const action=document.getElementById('filterAction').value.toLowerCase();
+  const source=document.getElementById('filterSource').value.toLowerCase();
+  const date=document.getElementById('filterDate').value;
+  const rows=document.querySelectorAll('#historyBody tr');
+  let visible=0;
+  rows.forEach(row=>{
+    const rc=row.dataset.component.toLowerCase();
+    const ra=row.dataset.action.toLowerCase();
+    const rs=row.dataset.source.toLowerCase();
+    const rd=row.dataset.date;
+    const show=
+      (!comp||rc.includes(comp))&&
+      (!action||ra===action)&&
+      (!source||rs.includes(source))&&
+      (!date||rd===date);
+    row.style.display=show?'':'none';
+    if(show)visible++;
+  });
+  document.getElementById('noResults').style.display=visible===0?'block':'none';
+}
+function clearFilters(){
+  document.getElementById('filterComponent').value='';
+  document.getElementById('filterAction').value='';
+  document.getElementById('filterSource').value='';
+  document.getElementById('filterDate').value='';
+  applyFilters();
+}
+</script>
 {% endblock %}

@@ -1,112 +1,159 @@
 {% extends "base.html" %}
 {% block content %}
-
-<h1>// VERSION UPDATE</h1>
-
-{% set label_map = {'OS': 'OS', 'BE': 'Backend', 'DB': 'Database', 'FW': 'Frontend'} %}
-{% set class_map = {'OS': 'comp-os', 'BE': 'comp-backend', 'DB': 'comp-db', 'FW': 'comp-frontend'} %}
+{% set label_map = {'OS':'Operating System','BE':'Backend','DB':'Database','FW':'Frontend'} %}
+{% set icon_map  = {'OS':'/static/OS.jpg','BE':'/static/back_end.jpg','DB':'/static/data_base.jpg','FW':'/static/frontend.jpg'} %}
 
 {% if not confirm %}
-<!-- STEP 1: Enter desired versions -->
-<div class="panel">
-  <div style="margin-bottom:1.2rem;">
-    <div style="font-size:0.7rem;letter-spacing:2px;text-transform:uppercase;color:var(--text-dim);font-family:var(--ui);font-weight:600;margin-bottom:0.5rem;">Instructions</div>
-    <div style="font-family:var(--mono);font-size:0.85rem;color:var(--text-dim);">Enter desired version for each component. Leave blank to keep current version.</div>
+<div class="page-title">Update {{ device.upper() }}</div>
+<div class="page-sub">Configure package source and target versions for each component</div>
+
+<form method="POST" action="{{ url_for('update', device=device) }}" id="updateForm">
+  <input type="hidden" name="device" value="{{ device }}">
+
+  <div class="section-label">Package Source</div>
+  <div class="form-card" style="margin-bottom:18px;">
+    <div class="form-section-title">Source Configuration</div>
+    <div class="form-row">
+      <label>Package Source</label>
+      <select name="branch" id="branchSel" onchange="handleBranch(this.value)" style="width:180px;">
+        <option value="manual">Manual Entry</option>
+        <option value="master">Master Branch</option>
+        <option value="side">Side Branch</option>
+      </select>
+    </div>
+    <div class="form-row" id="commitRow" style="display:none;">
+      <label>Commit ID</label>
+      <input type="text" name="commit_id" placeholder="e.g. a3f9c12" style="width:180px;">
+    </div>
+    <div class="form-row" id="branchRow" style="display:none;">
+      <label>Branch Name</label>
+      <input type="text" name="branch_name" placeholder="e.g. feature/auth" style="width:180px;">
+    </div>
   </div>
 
-  <form method="POST" action="{{ url_for('update') }}">
-    <div class="form-grid">
-      {% for component, version in installed.items() %}
-      {% set label = label_map.get(component, component) %}
-      {% set cls   = class_map.get(component, '') %}
-      <div class="form-group">
-        <label><span class="{{ cls }}">{{ label }}</span></label>
-        <input type="text" name="{{ component }}" placeholder="{{ version }}" />
-        <div class="hint">current: {{ version }}</div>
-      </div>
-      {% endfor %}
+  <div class="section-label">Target Versions</div>
+  <div class="form-card" id="versionInputs">
+    <div class="form-section-title">Enter desired version (leave blank to keep current)</div>
+    {% for component, version in installed.items() %}
+    {% set label = label_map.get(component, component) %}
+    {% set icon  = icon_map.get(component, '') %}
+    <div class="form-row">
+      <div class="row-icon"><img src="{{ icon }}" alt="{{ label }}"></div>
+      <label>{{ label }}</label>
+      <span class="current-ver">v{{ version }}</span>
+      <input type="text" name="{{ component }}" placeholder="{{ version }}">
     </div>
-    <div class="btn-row">
-      <button type="submit" class="btn btn-primary">Compare Versions →</button>
-      <a href="{{ url_for('index') }}" class="btn btn-ghost">Cancel</a>
-    </div>
-  </form>
-</div>
+    {% endfor %}
+  </div>
+
+  <div class="btn-group">
+    <button type="submit" class="btn btn-primary">Compare Versions →</button>
+    <a href="{{ url_for('index', device=device) }}" class="btn btn-secondary">Cancel</a>
+  </div>
+</form>
 
 {% else %}
-<!-- STEP 2: Comparison + downgrade warning modal -->
 
-{% set has_downgrade = actions.values() | select('equalto', 'downgrade') | list | length > 0 %}
+{% set has_downgrade = actions.values() | select('equalto','downgrade') | list | length > 0 %}
+{% set has_changes   = actions.values() | reject('equalto','nochange') | list | length > 0 %}
 
-<!-- DOWNGRADE WARNING MODAL -->
+<!-- NO CHANGE POPUP -->
+{% if not has_changes %}
+<div class="popup-bg active" id="noChangeBg"></div>
+<div class="popup-nochange active" id="noChangePopup">
+  <div style="font-size:2.5rem;margin-bottom:14px;">✅</div>
+  <div style="font-size:1.1rem;font-weight:600;letter-spacing:-0.02em;color:var(--black);margin-bottom:8px;">No Updates Needed</div>
+  <div style="font-size:0.83rem;color:var(--gray-500);line-height:1.5;margin-bottom:20px;">All components on <strong>{{ device.upper() }}</strong> are already at the desired versions.</div>
+  <a href="{{ url_for('index', device=device) }}" class="btn btn-primary" style="width:100%;justify-content:center;">← Back to Overview</a>
+</div>
+{% endif %}
+
+<!-- DOWNGRADE WARNING — CENTERED -->
 {% if has_downgrade %}
 <div class="modal-overlay active" id="downgradeModal">
   <div class="modal">
     <div class="modal-icon">⚠️</div>
-    <h2>DOWNGRADE WARNING</h2>
-    <p>The following components will be <strong style="color:var(--red)">downgraded</strong> to a lower version. This may cause instability or compatibility issues.</p>
+    <h2>Downgrade Warning</h2>
+    <p>The following components will be downgraded to a lower version. This may cause compatibility issues.</p>
     <div class="modal-items">
       {% for component, action in actions.items() %}
         {% if action == 'downgrade' %}
-          {% set label = label_map.get(component, component) %}
-          <div class="modal-item">↓ {{ label }}: {{ installed[component] }} → {{ desired[component] }}</div>
+          <div>↓ {{ label_map.get(component,component) }}: {{ installed[component] }} → {{ desired[component] }}</div>
         {% endif %}
       {% endfor %}
     </div>
-    <p>Are you sure you want to proceed?</p>
     <div class="modal-btns">
-      <a href="{{ url_for('update') }}" class="btn btn-ghost">← Go Back</a>
-      <button class="btn btn-danger" onclick="document.getElementById('downgradeModal').classList.remove('active')">Proceed Anyway</button>
+      <a href="{{ url_for('update', device=device) }}" class="btn btn-secondary">Go Back</a>
+      <button class="btn btn-danger" onclick="document.getElementById('downgradeModal').classList.remove('active')">Continue Anyway</button>
     </div>
   </div>
 </div>
 {% endif %}
 
-<div class="panel">
-  <div style="font-size:0.7rem;letter-spacing:2px;text-transform:uppercase;color:var(--text-dim);font-family:var(--ui);font-weight:600;margin-bottom:1rem;">Comparison Results</div>
-  <table>
-    <thead>
-      <tr>
-        <th>Component</th>
-        <th>Installed</th>
-        <th>Desired</th>
-        <th>Action</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for component in installed %}
-      {% set label = label_map.get(component, component) %}
-      {% set cls   = class_map.get(component, '') %}
-      <tr>
-        <td><span class="{{ cls }}">{{ label }}</span></td>
-        <td style="font-family:var(--mono)">{{ installed[component] }}</td>
-        <td style="font-family:var(--mono)">{{ desired[component] }}</td>
-        <td>
-          {% set action = actions[component] %}
-          {% if action == 'upgrade' %}
-            <span class="badge badge-upgrade">↑ Upgrade</span>
-          {% elif action == 'downgrade' %}
-            <span class="badge badge-downgrade">↓ Downgrade</span>
-          {% else %}
-            <span class="badge badge-nochange">✓ No Change</span>
-          {% endif %}
-        </td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
+<!-- PROGRESS -->
+<div class="progress-overlay" id="progressOverlay">
+  <div class="progress-box">
+    <div class="progress-icon">↺</div>
+    <div class="progress-title">Updating {{ device.upper() }}</div>
+    <div class="progress-sub" id="progressStep">Preparing...</div>
+    <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
+    <div class="progress-pct" id="progressPct">0%</div>
+  </div>
 </div>
 
-<form method="POST" action="{{ url_for('update') }}">
-  {% for component, version in desired.items() %}
-    <input type="hidden" name="{{ component }}" value="{{ version }}" />
+<div class="page-title">Update Summary</div>
+<div class="page-sub">{{ device.upper() }} · Source: {{ branch }}{% if commit_id %} · Commit: {{ commit_id }}{% endif %}</div>
+
+<div class="card">
+  {% for component in installed %}
+  {% set label  = label_map.get(component, component) %}
+  {% set icon   = icon_map.get(component, '') %}
+  {% set action = actions[component] %}
+  <div class="component-row">
+    <div class="component-icon"><img src="{{ icon }}" alt="{{ label }}"></div>
+    <div class="component-info">
+      <div class="component-name">{{ label }}</div>
+      <div class="component-version">{{ installed[component] }} → {{ desired[component] }}</div>
+    </div>
+    {% if action == 'upgrade' %}<span class="pill pill-blue"><span class="pill-dot"></span>Upgrade</span>
+    {% elif action == 'downgrade' %}<span class="pill pill-red"><span class="pill-dot"></span>Downgrade</span>
+    {% else %}<span class="pill pill-gray"><span class="pill-dot"></span>No change</span>{% endif %}
+  </div>
   {% endfor %}
-  <input type="hidden" name="confirm" value="1" />
-  <div class="btn-row">
-    <button type="submit" class="btn btn-success">Apply Updates ✓</button>
-    <a href="{{ url_for('update') }}" class="btn btn-ghost">← Go Back</a>
+</div>
+
+<form method="POST" action="{{ url_for('update', device=device) }}" id="confirmForm">
+  {% for component, version in desired.items() %}<input type="hidden" name="{{ component }}" value="{{ version }}">{% endfor %}
+  <input type="hidden" name="device" value="{{ device }}">
+  <input type="hidden" name="confirm" value="1">
+  <input type="hidden" name="branch" value="{{ branch }}">
+  <input type="hidden" name="commit_id" value="{{ commit_id }}">
+  <div class="btn-group">
+    {% if has_changes %}
+    <button type="button" class="btn btn-primary" onclick="startUpdate()">Apply Updates</button>
+    {% endif %}
+    <a href="{{ url_for('update', device=device) }}" class="btn btn-secondary">Go Back</a>
   </div>
 </form>
+
+<script>
+const steps=['Connecting to {{ device.upper() }}...','Verifying packages...','Downloading...','Installing OS...','Installing Backend...','Installing Database...','Installing Frontend...','Running checks...','Saving...','Complete ✓'];
+function startUpdate(){
+  document.getElementById('progressOverlay').classList.add('active');
+  let pct=0,s=0;
+  const fill=document.getElementById('progressFill'),pctEl=document.getElementById('progressPct'),stepEl=document.getElementById('progressStep');
+  const t=setInterval(()=>{pct+=10;fill.style.width=pct+'%';pctEl.textContent=pct+'%';stepEl.textContent=steps[s]||'';s++;
+    if(pct>=100){clearInterval(t);setTimeout(()=>document.getElementById('confirmForm').submit(),600);}},350);
+}
+</script>
 {% endif %}
 
+<script>
+function handleBranch(v){
+  document.getElementById('commitRow').style.display=v!=='manual'?'flex':'none';
+  document.getElementById('branchRow').style.display=v==='side'?'flex':'none';
+  const vi=document.getElementById('versionInputs');
+  if(vi){vi.style.opacity=v==='manual'?'1':'0.45';vi.style.pointerEvents=v==='manual'?'auto':'none';}
+}
+</script>
 {% endblock %}
