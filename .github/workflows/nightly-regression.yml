@@ -58,3 +58,39 @@ jobs:
           path: |
             regression-report.xml
             coverage.xml
+
+  # Only for manual runs ("Run workflow" button): run the suites on the in-cluster runner too,
+  # and push the results to the Pushgateway so they appear live on the Grafana dashboard.
+  # Scheduled runs skip this job - at 00:00 the laptop (and Minikube) may be off.
+  regression-to-dashboard:
+    name: Regression on cluster runner -> Grafana
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: [self-hosted, linux, minikube]
+    timeout-minutes: 15
+    env:
+      PUSHGATEWAY_URL: http://pushgateway.monitoring.svc.cluster.local:9091
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: python -m pip install -q --root-user-action=ignore -r requirements-dev.txt
+
+      - name: Sanity tests
+        run: python -m pytest -m sanity -q --junitxml=sanity-report.xml
+
+      - name: Regression tests
+        run: python -m pytest -m regression -q --junitxml=regression-report.xml
+
+      - name: Push results to Grafana (Pushgateway)
+        if: always()
+        run: |
+          for suite in sanity regression; do
+            if [ -f "$suite-report.xml" ]; then
+              python scripts/push_test_results.py --url "$PUSHGATEWAY_URL" \
+                --suite "$suite" --junit "$suite-report.xml" --commit "${GITHUB_SHA::7}"
+            fi
+          done
