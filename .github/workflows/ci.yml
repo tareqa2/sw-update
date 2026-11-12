@@ -102,6 +102,7 @@ jobs:
       KUBECTL_VERSION: v1.37.0
       # nginx Service, reached through cluster DNS - no tunnel, no port-forward
       BASE_URL: http://sw-nginx.sw-update.svc.cluster.local
+      PUSHGATEWAY_URL: http://pushgateway.monitoring.svc.cluster.local:9091
     steps:
       - name: Check out app code (for the e2e tests)
         uses: actions/checkout@v4
@@ -142,10 +143,21 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Post-deploy E2E tests
-        run: |
-          python -m pip install -q --root-user-action=ignore pytest requests
-          python -m pytest app/tests/e2e -m e2e --noconftest -v --junitxml=e2e-report.xml
+      - name: Install test dependencies
+        run: python -m pip install -q --root-user-action=ignore -r app/requirements-dev.txt
+
+      # Run every suite on the deployed environment and keep a JUnit report for each.
+      - name: Sanity tests
+        working-directory: app
+        run: python -m pytest -m sanity -q --junitxml=../sanity-report.xml
+
+      - name: Regression tests
+        working-directory: app
+        run: python -m pytest -m regression -q --junitxml=../regression-report.xml
+
+      - name: Post-deploy E2E tests (live cluster through nginx)
+        working-directory: app
+        run: python -m pytest tests/e2e -m e2e --noconftest -v --junitxml=../e2e-report.xml
 
       - name: Verify the new version is the one serving
         run: |
@@ -153,12 +165,24 @@ jobs:
           echo "Cluster serves version: $version (expected $TAG)"
           test "$version" = "$TAG"
 
-      - name: Upload E2E report
+      # Push results even when a suite failed - a red result is exactly what the dashboard should show.
+      - name: Push test results to Grafana (Pushgateway)
+        if: always()
+        continue-on-error: true
+        run: |
+          for suite in sanity regression e2e; do
+            if [ -f "$suite-report.xml" ]; then
+              python app/scripts/push_test_results.py --url "$PUSHGATEWAY_URL" \
+                --suite "$suite" --junit "$suite-report.xml" --commit "$TAG"
+            fi
+          done
+
+      - name: Upload test reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: e2e-report
-          path: e2e-report.xml
+          name: deploy-test-reports
+          path: "*-report.xml"
 
       - name: Show cluster state on failure
         if: failure()
