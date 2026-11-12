@@ -2,7 +2,6 @@
 {% block content %}
 {% set label_map = {'OS':'Operating System','BE':'Backend','DB':'Database','FW':'Frontend'} %}
 {% set icon_map  = {'OS':'/static/OS.jpg','BE':'/static/back_end.jpg','DB':'/static/data_base.jpg','FW':'/static/frontend.jpg'} %}
-{% set master = {'OS':'15.2','BE':'11.3.30','DB':'12.0','FW':'3.6.0'} %}
 
 <div class="page-title">{{ device.upper() }} Overview</div>
 <div class="page-sub">Current software versions installed on this device</div>
@@ -40,7 +39,7 @@
 </div>
 
 <div class="btn-group">
-  <a href="{{ url_for('update', device=device) }}" class="btn btn-primary">Check for Updates →</a>
-  <a href="{{ url_for('history', device=device) }}" class="btn btn-secondary">View History</a>
+  <a href="{{ url_for('web.update', device=device) }}" class="btn btn-primary">Check for Updates →</a>
+  <a href="{{ url_for('web.history', device=device) }}" class="btn btn-secondary">View History</a>
 </div>
 {% endblock %}

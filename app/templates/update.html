@@ -7,7 +7,7 @@
 <div class="page-title">Update {{ device.upper() }}</div>
 <div class="page-sub">Configure package source and target versions for each component</div>
 
-<form method="POST" action="{{ url_for('update', device=device) }}" id="updateForm">
+<form method="POST" action="{{ url_for('web.update', device=device) }}" id="updateForm">
   <input type="hidden" name="device" value="{{ device }}">
 
   <div class="section-label">Package Source</div>
@@ -48,14 +48,14 @@
 
   <div class="btn-group">
     <button type="submit" class="btn btn-primary">Compare Versions →</button>
-    <a href="{{ url_for('index', device=device) }}" class="btn btn-secondary">Cancel</a>
+    <a href="{{ url_for('web.index', device=device) }}" class="btn btn-secondary">Cancel</a>
   </div>
 </form>
 
 {% else %}
 
 {% set has_downgrade = actions.values() | select('equalto','downgrade') | list | length > 0 %}
-{% set has_changes   = actions.values() | reject('equalto','nochange') | list | length > 0 %}
+{% set has_changes   = actions.values() | reject('equalto','no_change') | list | length > 0 %}
 
 <!-- NO CHANGE POPUP -->
 {% if not has_changes %}
@@ -64,7 +64,7 @@
   <div style="font-size:2.5rem;margin-bottom:14px;">✅</div>
   <div style="font-size:1.1rem;font-weight:600;letter-spacing:-0.02em;color:var(--black);margin-bottom:8px;">No Updates Needed</div>
   <div style="font-size:0.83rem;color:var(--gray-500);line-height:1.5;margin-bottom:20px;">All components on <strong>{{ device.upper() }}</strong> are already at the desired versions.</div>
-  <a href="{{ url_for('index', device=device) }}" class="btn btn-primary" style="width:100%;justify-content:center;">← Back to Overview</a>
+  <a href="{{ url_for('web.index', device=device) }}" class="btn btn-primary" style="width:100%;justify-content:center;">← Back to Overview</a>
 </div>
 {% endif %}
 
@@ -83,7 +83,7 @@
       {% endfor %}
     </div>
     <div class="modal-btns">
-      <a href="{{ url_for('update', device=device) }}" class="btn btn-secondary">Go Back</a>
+      <a href="{{ url_for('web.update', device=device) }}" class="btn btn-secondary">Go Back</a>
       <button class="btn btn-danger" onclick="document.getElementById('downgradeModal').classList.remove('active')">Continue Anyway</button>
     </div>
   </div>
@@ -122,7 +122,7 @@
   {% endfor %}
 </div>
 
-<form method="POST" action="{{ url_for('update', device=device) }}" id="confirmForm">
+<form method="POST" action="{{ url_for('web.update', device=device) }}" id="confirmForm">
   {% for component, version in desired.items() %}<input type="hidden" name="{{ component }}" value="{{ version }}">{% endfor %}
   <input type="hidden" name="device" value="{{ device }}">
   <input type="hidden" name="confirm" value="1">
@@ -132,7 +132,7 @@
     {% if has_changes %}
     <button type="button" class="btn btn-primary" onclick="startUpdate()">Apply Updates</button>
     {% endif %}
-    <a href="{{ url_for('update', device=device) }}" class="btn btn-secondary">Go Back</a>
+    <a href="{{ url_for('web.update', device=device) }}" class="btn btn-secondary">Go Back</a>
   </div>
 </form>
 

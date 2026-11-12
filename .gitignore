@@ -7,3 +7,9 @@ venv/
 env/
 .env
 .vscode/
+# local runtime data and test output - never commit
+data/
+.pytest_cache/
+.coverage
+coverage.xml
+report.xml
