@@ -23,6 +23,9 @@ class Metrics:
         self.updates = Counter(
             "swupdate_component_updates_total", "Component update actions applied",
             ["device", "component", "action"], registry=self.registry)
+        self.update_operations = Counter(
+            "swupdate_update_operations_total", "Update operations applied (one per Apply, any number of components)",
+            ["device", "channel", "source"], registry=self.registry)
         self.devices_out_of_sync = Gauge(
             "swupdate_devices_out_of_sync", "Devices with at least one component off master",
             registry=self.registry)
@@ -31,6 +34,9 @@ class Metrics:
 
     def record_update(self, device, component, action):
         self.updates.labels(device, component, action).inc()
+
+    def record_operation(self, device, channel, source):
+        self.update_operations.labels(device, channel, source).inc()
 
     def init_app(self, app):
         self.app_info.labels(app.config["APP_VERSION"]).set(1)

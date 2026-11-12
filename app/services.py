@@ -91,7 +91,12 @@ class VersionService:
         actions = versions.plan_actions(installed, full_desired)
         return installed, full_desired, actions
 
-    def apply_update(self, device, desired, branch="manual", commit_id=""):
+    @staticmethod
+    def _source_kind(branch):
+        """Low-cardinality label for metrics: free-form side-branch names collapse to 'side'."""
+        return branch if branch in BRANCHES else "side"
+
+    def apply_update(self, device, desired, branch="manual", commit_id="", channel="api"):
         branch, commit_id = self._clean_source(branch, commit_id)
         installed, full_desired, actions = self.plan_update(device, desired)
         self.store.apply_update(device, installed, full_desired, actions, branch, commit_id)
@@ -99,6 +104,7 @@ class VersionService:
             # Count only the components the caller asked about; untouched ones are not "no change" requests.
             for component in desired:
                 self.metrics.record_update(device, component, actions[component])
+            self.metrics.record_operation(device, channel, self._source_kind(branch))
         return {
             "device": device,
             "branch": branch,
