@@ -153,7 +153,7 @@ function handleBranch(v){
   document.getElementById('commitRow').style.display=v!=='manual'?'flex':'none';
   document.getElementById('branchRow').style.display=v==='side'?'flex':'none';
   const vi=document.getElementById('versionInputs');
-  if(vi){vi.style.opacity=v==='manual'?'1':'0.45';vi.style.pointerEvents=v==='manual'?'auto':'none';}
+  if(vi){const locked=v==='master';vi.style.opacity=locked?'0.45':'1';vi.style.pointerEvents=locked?'none':'auto';}
 }
 </script>
 {% endblock %}
