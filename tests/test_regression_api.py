@@ -169,6 +169,20 @@ def test_ui_update_flow_plan_then_confirm(client):
     assert client.get("/api/v1/devices/lab7").get_json()["components"]["OS"]["version"] == "16.0"
 
 
+def test_ui_master_branch_installs_master_versions(client, update):
+    """Regression: Master Branch greys out the fields, so the backend must use the master versions."""
+    update("lab5", {"OS": "16.0", "DB": "11.0"})               # move lab5 off master first
+    plan = client.post("/update", data={"device": "lab5", "branch": "master", "commit_id": "a3f9c12"})
+    assert plan.status_code == 200
+    confirm = client.post("/update", data={"device": "lab5", "branch": "master",
+                                           "commit_id": "a3f9c12", "confirm": "1"})
+    assert confirm.status_code == 302
+    device = client.get("/api/v1/devices/lab5").get_json()
+    assert all(c["in_sync"] for c in device["components"].values())
+    latest = client.get("/api/v1/devices/lab5/history?component=OS&limit=1").get_json()["records"][0]
+    assert latest["Action"] == "downgrade" and latest["Branch"] == "master" and latest["CommitID"] == "a3f9c12"
+
+
 def test_ui_rejects_invalid_version_without_crashing(client):
     r = client.post("/update", data={"device": "lab7", "OS": "banana", "branch": "manual", "confirm": "1"})
     assert r.status_code == 400

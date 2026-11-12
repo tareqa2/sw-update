@@ -41,8 +41,13 @@ def update():
     if branch == "side":
         branch = request.form.get("branch_name", "").strip() or "side"
     commit_id = request.form.get("commit_id", "").strip()
-    desired = {c: request.form.get(c, "").strip() for c in installed}
-    desired = {c: v for c, v in desired.items() if v}
+    if branch == "master":
+        # Master Branch means "bring this device to the master reference versions":
+        # the form disables the version fields, so the targets come from config.
+        desired = dict(service.master)
+    else:
+        desired = {c: request.form.get(c, "").strip() for c in installed}
+        desired = {c: v for c, v in desired.items() if v}
 
     try:
         if not desired:
