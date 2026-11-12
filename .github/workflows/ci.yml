@@ -1,6 +1,12 @@
-# CI/CD for the app.
-#   pull request -> lint + sanity + docker build (no push)       "is this safe to merge?"
-#   push to main -> same checks, then push image, deploy, e2e    "ship it, then prove it works"
+# CI/CD for the app - 5 stages:
+#
+#   1. Lint  ->  2. Test  ->  3. Build & push  ->  4. Deploy  ->  5. Verify
+#                   |-- sanity       (Flask test client)
+#                   |-- regression   (Flask test client)
+#                   '-- e2e          (the real Docker image, started inside the job)
+#
+#   pull request : stages 1-3 (image is built, not pushed)    "is this safe to merge?"
+#   push to main : all 5 stages                                "ship it, then prove it works"
 name: ci-cd
 
 on:
@@ -23,9 +29,9 @@ env:
   PYTHON_VERSION: "3.12"
 
 jobs:
-  # ---------------------------------------------------------------- 1. lint + sanity
-  test:
-    name: Lint and sanity tests
+  # ------------------------------------------------------------------ 1. LINT
+  lint:
+    name: 1. Lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -39,22 +45,65 @@ jobs:
       - name: Install dependencies
         run: python -m pip install -r requirements-dev.txt
 
-      - name: Lint (flake8)
+      - name: flake8
         run: python -m flake8 .
 
-      - name: Sanity tests
-        run: python -m pytest -m sanity -v --junitxml=sanity-report.xml
+  # ------------------------------------------------------------------ 2. TEST
+  # One stage, three suites running in parallel. fail-fast: false = every suite
+  # finishes and reports, even if another one fails.
+  test:
+    name: 2. Test (${{ matrix.suite }})
+    needs: lint
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [sanity, regression, e2e]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements-dev.txt
+
+      - name: Sanity / regression tests
+        if: matrix.suite != 'e2e'
+        run: python -m pytest -m ${{ matrix.suite }} -v --junitxml=${{ matrix.suite }}-report.xml
+
+      # E2E before anything ships: build the real image and test it over HTTP,
+      # exactly as nginx will call it in Kubernetes.
+      - name: Build and start the app container
+        if: matrix.suite == 'e2e'
+        run: |
+          docker build -t sw-update:ci --build-arg APP_VERSION=ci .
+          docker run -d --name app -p 8080:8000 -e SECRET_KEY="$(openssl rand -hex 32)" sw-update:ci
+          for i in $(seq 30); do
+            curl -sf http://127.0.0.1:8080/readyz && exit 0
+            sleep 2
+          done
+          docker logs app; exit 1
+
+      - name: E2E tests against the container
+        if: matrix.suite == 'e2e'
+        env:
+          BASE_URL: http://127.0.0.1:8080
+        run: python -m pytest tests/e2e -m e2e --noconftest -v --junitxml=e2e-report.xml
 
       - name: Upload test report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: sanity-report
-          path: sanity-report.xml
+          name: report-${{ matrix.suite }}
+          path: ${{ matrix.suite }}-report.xml
 
-  # ---------------------------------------------------------------- 2. build image
+  # ------------------------------------------------------------------ 3. BUILD & PUSH
   build:
-    name: Build and push image
+    name: 3. Build and push image
     needs: test
     runs-on: ubuntu-latest
     outputs:
@@ -88,11 +137,11 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # ---------------------------------------------------------------- 3. deploy + e2e
+  # ------------------------------------------------------------------ 4. DEPLOY
   # Runs on the self-hosted runner pod INSIDE Minikube (the only place that can reach the cluster).
   # kubectl authenticates with the pod's ServiceAccount, which RBAC limits to the sw-update namespace.
   deploy:
-    name: Deploy to Minikube and run E2E
+    name: 4. Deploy to Minikube
     needs: build
     if: github.event_name != 'pull_request'
     runs-on: [self-hosted, linux, minikube]
@@ -100,15 +149,7 @@ jobs:
     env:
       TAG: ${{ needs.build.outputs.tag }}
       KUBECTL_VERSION: v1.37.0
-      # nginx Service, reached through cluster DNS - no tunnel, no port-forward
-      BASE_URL: http://sw-nginx.sw-update.svc.cluster.local
-      PUSHGATEWAY_URL: http://pushgateway.monitoring.svc.cluster.local:9091
     steps:
-      - name: Check out app code (for the e2e tests)
-        uses: actions/checkout@v4
-        with:
-          path: app
-
       - name: Check out Kubernetes manifests
         uses: actions/checkout@v4
         with:
@@ -139,25 +180,34 @@ jobs:
           kubectl -n sw-update rollout status deploy/sw-backend --timeout=180s
           kubectl -n sw-update rollout status deploy/sw-nginx --timeout=120s
 
+      - name: Show cluster state on failure
+        if: failure()
+        run: |
+          kubectl -n sw-update get pods -o wide
+          kubectl -n sw-update describe deploy sw-backend
+          kubectl -n sw-update logs deploy/sw-backend --tail=50
+
+  # ------------------------------------------------------------------ 5. VERIFY
+  # Prove the live cluster works through nginx, then send every suite's result to Grafana.
+  verify:
+    name: 5. Verify live cluster
+    needs: [build, deploy]
+    if: github.event_name != 'pull_request'
+    runs-on: [self-hosted, linux, minikube]
+    env:
+      TAG: ${{ needs.build.outputs.tag }}
+      # nginx Service, reached through cluster DNS - no tunnel, no port-forward
+      BASE_URL: http://sw-nginx.sw-update.svc.cluster.local
+      PUSHGATEWAY_URL: http://pushgateway.monitoring.svc.cluster.local:9091
+    steps:
+      - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Install test dependencies
-        run: python -m pip install -q --root-user-action=ignore -r app/requirements-dev.txt
-
-      # Run every suite on the deployed environment and keep a JUnit report for each.
-      - name: Sanity tests
-        working-directory: app
-        run: python -m pytest -m sanity -q --junitxml=../sanity-report.xml
-
-      - name: Regression tests
-        working-directory: app
-        run: python -m pytest -m regression -q --junitxml=../regression-report.xml
-
-      - name: Post-deploy E2E tests (live cluster through nginx)
-        working-directory: app
-        run: python -m pytest tests/e2e -m e2e --noconftest -v --junitxml=../e2e-report.xml
+        run: python -m pip install -q --root-user-action=ignore -r requirements-dev.txt
 
       - name: Verify the new version is the one serving
         run: |
@@ -165,28 +215,37 @@ jobs:
           echo "Cluster serves version: $version (expected $TAG)"
           test "$version" = "$TAG"
 
+      - name: E2E tests on the live cluster (through nginx)
+        run: python -m pytest tests/e2e -m e2e --noconftest -v --junitxml=e2e-report.xml
+
+      # Sanity + regression reports come from stage 2; e2e is the live-cluster run above.
+      - name: Download stage-2 test reports
+        if: always()
+        uses: actions/download-artifact@v4
+        with:
+          pattern: report-*
+          path: stage2
+          merge-multiple: true
+
       # Push results even when a suite failed - a red result is exactly what the dashboard should show.
       - name: Push test results to Grafana (Pushgateway)
         if: always()
         continue-on-error: true
         run: |
-          for suite in sanity regression e2e; do
-            if [ -f "$suite-report.xml" ]; then
-              python app/scripts/push_test_results.py --url "$PUSHGATEWAY_URL" \
-                --suite "$suite" --junit "$suite-report.xml" --commit "$TAG"
+          for suite in sanity regression; do
+            if [ -f "stage2/$suite-report.xml" ]; then
+              python scripts/push_test_results.py --url "$PUSHGATEWAY_URL" \
+                --suite "$suite" --junit "stage2/$suite-report.xml" --commit "$TAG"
             fi
           done
+          if [ -f e2e-report.xml ]; then
+            python scripts/push_test_results.py --url "$PUSHGATEWAY_URL" \
+              --suite e2e --junit e2e-report.xml --commit "$TAG"
+          fi
 
-      - name: Upload test reports
+      - name: Upload live E2E report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: deploy-test-reports
-          path: "*-report.xml"
-
-      - name: Show cluster state on failure
-        if: failure()
-        run: |
-          kubectl -n sw-update get pods -o wide
-          kubectl -n sw-update describe deploy sw-backend
-          kubectl -n sw-update logs deploy/sw-backend --tail=50
+          name: report-e2e-live
+          path: e2e-report.xml
