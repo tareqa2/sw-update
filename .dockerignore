@@ -1,0 +1,24 @@
+# Only what the image needs goes into the build context.
+# Smaller context = faster builds, and no secrets or junk leak into the image.
+.git
+.github
+.venv
+venv
+.vscode
+__pycache__
+*.pyc
+.pytest_cache
+.coverage
+coverage.xml
+report.xml
+data
+tests
+.env
+*.env
+Dockerfile
+.dockerignore
+README.md
+.flake8
+pytest.ini
+requirements-dev.txt
+*.zip
