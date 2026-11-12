@@ -96,8 +96,9 @@ class VersionService:
         installed, full_desired, actions = self.plan_update(device, desired)
         self.store.apply_update(device, installed, full_desired, actions, branch, commit_id)
         if self.metrics:
-            for component, action in actions.items():
-                self.metrics.record_update(device, component, action)
+            # Count only the components the caller asked about; untouched ones are not "no change" requests.
+            for component in desired:
+                self.metrics.record_update(device, component, actions[component])
         return {
             "device": device,
             "branch": branch,
