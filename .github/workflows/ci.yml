@@ -1,0 +1,165 @@
+# CI/CD for the app.
+#   pull request -> lint + sanity + docker build (no push)       "is this safe to merge?"
+#   push to main -> same checks, then push image, deploy, e2e    "ship it, then prove it works"
+name: ci-cd
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# A newer push to the same branch cancels the older, still-running pipeline.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read            # least privilege: the workflow only needs to read the repo
+
+env:
+  IMAGE: tareqelya12/sw-update
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  # ---------------------------------------------------------------- 1. lint + sanity
+  test:
+    name: Lint and sanity tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements-dev.txt
+
+      - name: Lint (flake8)
+        run: python -m flake8 .
+
+      - name: Sanity tests
+        run: python -m pytest -m sanity -v --junitxml=sanity-report.xml
+
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sanity-report
+          path: sanity-report.xml
+
+  # ---------------------------------------------------------------- 2. build image
+  build:
+    name: Build and push image
+    needs: test
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Image tag = short commit SHA
+        id: meta
+        run: echo "tag=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # On a PR: build only (proves the Dockerfile still works). On main: build and push.
+      - name: Build (and push on main)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: ${{ github.event_name != 'pull_request' }}
+          build-args: APP_VERSION=${{ steps.meta.outputs.tag }}
+          tags: |
+            ${{ env.IMAGE }}:${{ steps.meta.outputs.tag }}
+            ${{ env.IMAGE }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ---------------------------------------------------------------- 3. deploy + e2e
+  # Runs on the self-hosted runner on the laptop: the only machine that can reach Minikube.
+  deploy:
+    name: Deploy to Minikube and run E2E
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: [self-hosted, windows, minikube]
+    environment: minikube
+    defaults:
+      run:
+        shell: powershell
+    env:
+      TAG: ${{ needs.build.outputs.tag }}
+    steps:
+      - name: Check out app code (for the e2e tests)
+        uses: actions/checkout@v4
+        with:
+          path: app
+
+      - name: Check out Kubernetes manifests
+        uses: actions/checkout@v4
+        with:
+          repository: tareqa2/sw-update-devops
+          path: devops
+
+      - name: Make sure we are pointed at Minikube
+        run: |
+          $ctx = kubectl config current-context
+          if ($ctx -ne "minikube") { throw "kubectl context is '$ctx', expected 'minikube'" }
+
+      - name: Ensure namespace and Secret exist
+        run: |
+          kubectl apply -f devops/k8s/namespace.yaml
+          kubectl -n sw-update create secret generic sw-backend-secret `
+            --from-literal=SECRET_KEY="${{ secrets.APP_SECRET_KEY }}" `
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Deploy image ${{ env.TAG }}
+        run: |
+          (Get-Content devops/k8s/kustomization.yaml) -replace 'newTag: .*', "newTag: $env:TAG" |
+            Set-Content devops/k8s/kustomization.yaml
+          kubectl apply -k devops/k8s
+          kubectl -n sw-update rollout status deploy/sw-backend --timeout=180s
+          kubectl -n sw-update rollout status deploy/sw-nginx --timeout=120s
+
+      - name: Post-deploy E2E tests
+        run: |
+          $pf = Start-Process kubectl -ArgumentList "-n","sw-update","port-forward","svc/sw-nginx","18080:80" -PassThru -WindowStyle Hidden
+          try {
+            Start-Sleep -Seconds 4
+            python -m venv .e2e-venv
+            .\.e2e-venv\Scripts\python.exe -m pip install -q requests pytest
+            $env:BASE_URL = "http://127.0.0.1:18080"
+            .\.e2e-venv\Scripts\python.exe -m pytest app/tests/e2e -m e2e -v --junitxml=e2e-report.xml
+            if ($LASTEXITCODE -ne 0) { throw "E2E tests failed" }
+            $version = (Invoke-RestMethod "$env:BASE_URL/healthz").version
+            if ($version -ne $env:TAG) { throw "Cluster runs '$version', expected '$env:TAG'" }
+            Write-Host "Deployed and verified version $version"
+          } finally {
+            Stop-Process -Id $pf.Id -ErrorAction SilentlyContinue
+          }
+
+      - name: Upload E2E report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-report
+          path: e2e-report.xml
+
+      - name: Show cluster state on failure
+        if: failure()
+        run: |
+          kubectl -n sw-update get pods -o wide
+          kubectl -n sw-update describe deploy sw-backend
+          kubectl -n sw-update logs deploy/sw-backend --tail=50
