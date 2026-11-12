@@ -89,18 +89,19 @@ jobs:
           cache-to: type=gha,mode=max
 
   # ---------------------------------------------------------------- 3. deploy + e2e
-  # Runs on the self-hosted runner on the laptop: the only machine that can reach Minikube.
+  # Runs on the self-hosted runner pod INSIDE Minikube (the only place that can reach the cluster).
+  # kubectl authenticates with the pod's ServiceAccount, which RBAC limits to the sw-update namespace.
   deploy:
     name: Deploy to Minikube and run E2E
     needs: build
     if: github.event_name != 'pull_request'
-    runs-on: [self-hosted, windows, minikube]
+    runs-on: [self-hosted, linux, minikube]
     environment: minikube
-    defaults:
-      run:
-        shell: powershell
     env:
       TAG: ${{ needs.build.outputs.tag }}
+      KUBECTL_VERSION: v1.37.0
+      # nginx Service, reached through cluster DNS - no tunnel, no port-forward
+      BASE_URL: http://sw-nginx.sw-update.svc.cluster.local
     steps:
       - name: Check out app code (for the e2e tests)
         uses: actions/checkout@v4
@@ -113,42 +114,44 @@ jobs:
           repository: tareqa2/sw-update-devops
           path: devops
 
-      - name: Make sure we are pointed at Minikube
+      - name: Install kubectl ${{ env.KUBECTL_VERSION }}
         run: |
-          $ctx = kubectl config current-context
-          if ($ctx -ne "minikube") { throw "kubectl context is '$ctx', expected 'minikube'" }
+          curl -sSLo "$RUNNER_TEMP/kubectl" "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+          chmod +x "$RUNNER_TEMP/kubectl"
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
 
-      - name: Ensure namespace and Secret exist
+      - name: Check cluster access (RBAC)
         run: |
-          kubectl apply -f devops/k8s/namespace.yaml
-          kubectl -n sw-update create secret generic sw-backend-secret `
-            --from-literal=SECRET_KEY="${{ secrets.APP_SECRET_KEY }}" `
+          kubectl auth can-i patch deployments -n sw-update
+          kubectl -n sw-update get deploy
+
+      - name: Ensure the app Secret exists
+        run: |
+          kubectl -n sw-update create secret generic sw-backend-secret \
+            --from-literal=SECRET_KEY="${{ secrets.APP_SECRET_KEY }}" \
             --dry-run=client -o yaml | kubectl apply -f -
 
       - name: Deploy image ${{ env.TAG }}
         run: |
-          (Get-Content devops/k8s/kustomization.yaml) -replace 'newTag: .*', "newTag: $env:TAG" |
-            Set-Content devops/k8s/kustomization.yaml
+          sed -i "s/newTag: .*/newTag: ${TAG}/" devops/k8s/kustomization.yaml
           kubectl apply -k devops/k8s
           kubectl -n sw-update rollout status deploy/sw-backend --timeout=180s
           kubectl -n sw-update rollout status deploy/sw-nginx --timeout=120s
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
       - name: Post-deploy E2E tests
         run: |
-          $pf = Start-Process kubectl -ArgumentList "-n","sw-update","port-forward","svc/sw-nginx","18080:80" -PassThru -WindowStyle Hidden
-          try {
-            Start-Sleep -Seconds 4
-            python -m venv .e2e-venv
-            .\.e2e-venv\Scripts\python.exe -m pip install -q requests pytest
-            $env:BASE_URL = "http://127.0.0.1:18080"
-            .\.e2e-venv\Scripts\python.exe -m pytest app/tests/e2e -m e2e -v --junitxml=e2e-report.xml
-            if ($LASTEXITCODE -ne 0) { throw "E2E tests failed" }
-            $version = (Invoke-RestMethod "$env:BASE_URL/healthz").version
-            if ($version -ne $env:TAG) { throw "Cluster runs '$version', expected '$env:TAG'" }
-            Write-Host "Deployed and verified version $version"
-          } finally {
-            Stop-Process -Id $pf.Id -ErrorAction SilentlyContinue
-          }
+          python -m pip install -q pytest requests
+          python -m pytest app/tests/e2e -m e2e -v --junitxml=e2e-report.xml
+
+      - name: Verify the new version is the one serving
+        run: |
+          version=$(curl -sf "$BASE_URL/healthz" | python -c 'import json,sys; print(json.load(sys.stdin)["version"])')
+          echo "Cluster serves version: $version (expected $TAG)"
+          test "$version" = "$TAG"
 
       - name: Upload E2E report
         if: always()
