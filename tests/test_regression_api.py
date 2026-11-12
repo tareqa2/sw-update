@@ -212,3 +212,16 @@ def test_update_metrics_count_only_requested_components(client, update):
     body = client.get("/metrics").get_data(as_text=True)
     assert 'swupdate_component_updates_total{action="no_change",component="OS",device="lab9"} 1.0' in body
     assert 'component="BE",device="lab9"' not in body
+
+
+def test_update_operations_counted_once_per_apply_by_channel(client, update):
+    """One Apply = one operation, however many components it changes; UI and API are told apart."""
+    update("lab3", {"OS": "16.0", "DB": "11.0"})                                    # API, 2 components
+    web = "/update"
+    client.post(web, data={"device": "lab3", "OS": "16.1", "branch": "manual", "confirm": "1"})  # web UI
+    client.post(web, data={"device": "lab4", "branch": "master", "confirm": "1"})                # web UI
+    client.post(web, data={"device": "lab4", "OS": "x", "branch": "manual", "confirm": "1"})     # invalid: not counted
+    body = client.get("/metrics").get_data(as_text=True)
+    assert 'swupdate_update_operations_total{channel="api",device="lab3",source="manual"} 1.0' in body
+    assert 'swupdate_update_operations_total{channel="web",device="lab3",source="manual"} 1.0' in body
+    assert 'swupdate_update_operations_total{channel="web",device="lab4",source="master"} 1.0' in body

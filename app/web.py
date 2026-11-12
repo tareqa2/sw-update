@@ -53,7 +53,7 @@ def update():
         if not desired:
             raise ValidationError("enter at least one target version")
         if "confirm" in request.form:
-            service.apply_update(device, desired, branch=branch, commit_id=commit_id)
+            service.apply_update(device, desired, branch=branch, commit_id=commit_id, channel="web")
             flash(f"{device.upper()} updated", "success")
             return redirect(url_for("web.index", device=device))
         installed, full_desired, actions = service.plan_update(device, desired)
