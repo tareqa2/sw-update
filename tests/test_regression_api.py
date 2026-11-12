@@ -190,3 +190,11 @@ def test_update_metrics_are_counted(client, update):
     body = client.get("/metrics").get_data(as_text=True)
     assert 'swupdate_component_updates_total{action="upgrade",component="OS",device="lab8"} 1.0' in body
     assert "swupdate_devices_out_of_sync 1.0" in body
+
+
+def test_update_metrics_count_only_requested_components(client, update):
+    """Untouched components must not inflate the no_change count on the dashboard."""
+    update("lab9", {"OS": "15.2"})  # explicit no-change request for OS only
+    body = client.get("/metrics").get_data(as_text=True)
+    assert 'swupdate_component_updates_total{action="no_change",component="OS",device="lab9"} 1.0' in body
+    assert 'component="BE",device="lab9"' not in body
