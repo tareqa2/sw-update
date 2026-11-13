@@ -21,7 +21,7 @@ def validate_version(value, field="version"):
         raise ValidationError(f"{field} must be a string")
     value = value.strip()
     if not value:
-        raise ValidationError(f"{field} must not be empty")
+        raise ValidationError(f"{field} must not be  jxj empty")
     if len(value) > MAX_VERSION_LENGTH:
         raise ValidationError(f"{field} is too long (max {MAX_VERSION_LENGTH} chars)")
     if not VERSION_RE.match(value):
